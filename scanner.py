@@ -7,7 +7,25 @@ TIMEOUT = 0.01      # How many seconds to wait for each port
 WORKERS = 100       # The amount of ports that are checked at the same time
 FIRST_PORT = 1
 LAST_PORT = 65536
-
+PORTS_DIC = {
+    21: "FTP -> Sending files to and from a server.",
+    22: "SSH -> Secure remote command-line access to a machine.",
+    23: "Telnet -> Remote command-line access with no encryption.",
+    25: "SMTP -> Mail servers passing email to each other.",
+    53: "DNS -> Turning names like example.com into IP addresses.",
+    80: "HTTP -> Ordinary, unencrypted web pages.",
+    110: "POP3 -> Downloading email from a mail server.",
+    143: "IMAP -> Reading email that stays on the server.",
+    443: "HTTPS -> Web pages encrypted with TLS.",
+    465: "SMTPS -> Sending email to a mail server over an encrypted connection.",
+    587: "SMTP submission -> Sending email from a mail client to its server.",
+    993: "IMAPS -> IMAP wrapped in encryption.",
+    995: "POP3S -> POP3 wrapped in encryption.",
+    3306: "MySQL -> A common database server.",
+    3389: "RDP -> Windows Remote Desktop.",
+    5432: "PostgreSQL -> Another common database server.",
+    8080: "HTTP alternate -> A second port often used for web servers and proxies.",
+}
 
 # Keep asking until the user gives a valid IPv4 address or range
 while True:
@@ -94,7 +112,10 @@ with ThreadPoolExecutor(max_workers=WORKERS) as executor:
         results = executor.map(check_pair, pairs)
         for (host_ip, port), is_open in zip(pairs, results):
             if is_open:
-                print(f"Port {port} on {host_ip} is listening")
+                if port in PORTS_DIC:
+                    print(f"Port {port} on {host_ip} is listening.\n\tPort commonly used for: {PORTS_DIC[port]}")
+                else:
+                    print(f"Port {port} on {host_ip} is listening")
 
         print(f"Finished {ip}")
 
