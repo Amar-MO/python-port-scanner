@@ -1,9 +1,10 @@
+import argparse
 import ipaddress
 import socket
 import time
 from concurrent.futures import ThreadPoolExecutor
 
-TIMEOUT = 0.01      # How many seconds to wait for each port
+TIMEOUT = 0.5       # How many seconds to wait for each port
 WORKERS = 100       # The amount of ports that are checked at the same time
 FIRST_PORT = 1
 LAST_PORT = 65536
@@ -27,61 +28,72 @@ PORTS_DIC = {
     8080: "HTTP alternate -> A second port often used for web servers and proxies.",
 }
 
-# Keep asking until the user gives a valid IPv4 address or range
-while True:
+
+# These functions check what the user typed, and argparse calls them for us
+def valid_target(text):
     try:
-        user_input = input("What do you want to scan?\n")
-        network = ipaddress.ip_network(user_input, strict=False)
+        network = ipaddress.ip_network(text, strict=False)
     except ValueError:
-        print("Invalid input, please enter a valid IPv4 address or address range.")
-        continue
+        raise argparse.ArgumentTypeError("Invalid input, please enter a valid IPv4 address or address range.")
     if network.version != 4:
-        print("Only IPv4 is supported, please try again.")
-        continue
-    break
+        raise argparse.ArgumentTypeError("Only IPv4 is supported, please try again.")
+    return network
 
-while True:
-    ports_input = input("Would you like to scan: One port(type a port number)/ All ports(a)/ well-known ports(w)/ a range(r).\n")
-    if ports_input.isdigit():
-        if int(ports_input) > 0 and int(ports_input) < 65536:
-            FIRST_PORT = int(ports_input)
-            LAST_PORT = int(ports_input) + 1
-            break
-        else:
-            print("Value is out of range, please try again.")
-    elif ports_input == "a" or ports_input == "A":
-        FIRST_PORT = 1
-        LAST_PORT = 65536
-        break
-    elif ports_input == "w" or ports_input == "W":
-        FIRST_PORT = 1
-        LAST_PORT = 1024
-        break
-    elif ports_input == "r" or ports_input == "R":
-        FIRST_PORT = input("Please input first port: \n")
-        if not FIRST_PORT.isdigit():
-            print("Invalid input, please try again.")
-            continue
-        elif int(FIRST_PORT) <= 0 or int(FIRST_PORT) > 65535:
-            print("Invalid input, please try again.")
-            continue
-        else:
-            FIRST_PORT = int(FIRST_PORT)
-        LAST_PORT = input("Please input last port: \n")
-        if not LAST_PORT.isdigit():
-            print("Invalid input, please try again.")
-            continue
-        elif int(LAST_PORT) <= 0 or int(LAST_PORT) > 65535 or int(LAST_PORT) < int(FIRST_PORT):
-            print("Invalid input, please try again.")
-            continue
 
-        
-        LAST_PORT = int(LAST_PORT) + 1
-        break
+def valid_ports(text):
+    if text.isdigit():
+        if int(text) > 0 and int(text) < 65536:
+            return int(text), int(text) + 1
+        else:
+            raise argparse.ArgumentTypeError("Value is out of range, ports go from 1 to 65535.")
+    elif text == "a" or text == "A":
+        return 1, 65536
+    elif text == "w" or text == "W":
+        return 1, 1024
     else:
-        print("Invalid input, please try again.")
-        
+        parts = text.split("-")
+        if len(parts) != 2 or not parts[0].isdigit() or not parts[1].isdigit():
+            raise argparse.ArgumentTypeError("Invalid input, use a port number, a range like 20-80, w or a.")
+        first = int(parts[0])
+        last = int(parts[1])
+        if first <= 0 or last > 65535 or last < first:
+            raise argparse.ArgumentTypeError("Invalid range, ports go from 1 to 65535 and the first can't be above the last.")
+        return first, last + 1
 
+
+def valid_timeout(text):
+    try:
+        value = float(text)
+    except ValueError:
+        raise argparse.ArgumentTypeError("Timeout must be a number.")
+    if value <= 0:
+        raise argparse.ArgumentTypeError("Timeout must be above 0.")
+    return value
+
+
+def valid_workers(text):
+    if not text.isdigit() or int(text) < 1:
+        raise argparse.ArgumentTypeError("Workers must be a whole number of at least 1.")
+    return int(text)
+
+
+parser = argparse.ArgumentParser(
+    description="A multithreaded TCP port scanner for IPv4 addresses and CIDR ranges.",
+    epilog="Only scan devices and networks that you own or have permission to scan.")
+parser.add_argument("target", type=valid_target,
+                    help="IPv4 address or CIDR range, for example 127.0.0.1 or 192.168.1.0/24")
+parser.add_argument("-p", "--ports", type=valid_ports, default="w",
+                    help="a port (80), a range (20-80), w for well-known ports 1-1023, or a for all ports (default: w)")
+parser.add_argument("-t", "--timeout", type=valid_timeout, default=TIMEOUT,
+                    help="seconds to wait for each port (default: 0.5)")
+parser.add_argument("--workers", type=valid_workers, default=WORKERS,
+                    help="how many ports are checked at the same time (default: 100)")
+args = parser.parse_args()
+
+network = args.target
+FIRST_PORT, LAST_PORT = args.ports
+TIMEOUT = args.timeout
+WORKERS = args.workers
 
 
 def is_listening(ip, port, time_out=TIMEOUT):
@@ -120,4 +132,4 @@ with ThreadPoolExecutor(max_workers=WORKERS) as executor:
         print(f"Finished {ip}")
 
 end_time = time.time()
-print(f"Scan took {end_time - start_time:.2f} seconds")    
+print(f"Scan took {end_time - start_time:.2f} seconds")   
