@@ -12,9 +12,9 @@ Only scan devices and networks that you own or have explicit permission to scan.
 
 - Scans a single IPv4 address (`192.168.1.10`) or a CIDR range (`192.168.1.0/24`)
 - Skips the network and broadcast addresses of a range automatically
-- Checks ports 1 to 65535 on each address
+- Lets you choose which ports to scan: one port, a custom range, the well-known ports (1-1023) or all ports (1-65535)
 - Uses a thread pool so many ports are checked at the same time
-- Validates input and rejects invalid addresses and IPv6
+- Validates input and rejects invalid addresses, IPv6 and invalid port numbers
 - Prints progress after each address and the total scan time
 
 ## Requirements
@@ -28,39 +28,52 @@ Only scan devices and networks that you own or have explicit permission to scan.
 python scanner.py
 ```
 
-Enter a target when asked, for example `127.0.0.1` or `192.168.1.0/24`.
+The scanner asks two questions:
 
-Example output:
+1. **What do you want to scan?** A single address such as `127.0.0.1`, or a range such as `192.168.1.0/24`.
+2. **Which ports?** Type a port number to scan one port, `r` for a range (it then asks for the first and last port), `w` for the well-known ports (1-1023), or `a` for all ports (1-65535).
+
+Example output (trimmed):
 
 ```
 What do you want to scan?
-127.0.0.1
-Scanning 127.0.0.1/32 (ports 1-65535)
+127.0.0.1/28
+Would you like to scan: One port(type a port number)/ All ports(a)/ well-known ports(w)/ a range(r).
+w
+Scanning 127.0.0.0/28 (ports 1-1023)
 Port 135 on 127.0.0.1 is listening
 Port 445 on 127.0.0.1 is listening
-Port 8000 on 127.0.0.1 is listening
+Port 623 on 127.0.0.1 is listening
 Finished 127.0.0.1
-Scan took 12.57 seconds
+Port 135 on 127.0.0.2 is listening
+Port 445 on 127.0.0.2 is listening
+Port 623 on 127.0.0.2 is listening
+Finished 127.0.0.2
+...
+Finished 127.0.0.14
+Scan took 3.24 seconds
 ```
 
-Settings (`TIMEOUT`, `WORKERS`, `FIRST_PORT`, `LAST_PORT`) are constants at the top of `scanner.py`.
+Settings (`TIMEOUT` and `WORKERS`) are constants at the top of `scanner.py`.
 
 ## How it works
 
 1. **Input and subnetting:** the `ipaddress` module turns text like `192.168.1.0/24` into a network object and lists its usable host addresses.
-2. **TCP connect scan:** for each port, a socket tries to complete the TCP three-way handshake with `connect_ex`. If it succeeds, the port is open.
-3. **Threading:** a `ThreadPoolExecutor` runs many of these checks at once. The scanner spends nearly all its time waiting for replies, so the waits overlap.
-4. **One address at a time:** the list of jobs is built per address, so memory use doesn't grow with the size of the range.
+2. **Port selection:** a small menu works out the first and last port to scan and rejects anything that is not a whole number from 1 to 65535.
+3. **TCP connect scan:** for each port, a socket tries to complete the TCP three-way handshake with `connect_ex`. If it succeeds, the port is open.
+4. **Threading:** a `ThreadPoolExecutor` runs many of these checks at once. The scanner spends nearly all its time waiting for replies, so the waits overlap.
+5. **One address at a time:** the list of jobs is built per address, so memory use doesn't grow with the size of the range.
 
 ## Performance
 
 Tested on `127.0.0.1` with a 0.01 second timeout and 100 workers:
 
-| Version | Ports | Time |
-|---|---|---|
-| One port at a time | 1-1249 | 20.2 s |
-| Thread pool | 1-1249 | 0.24 s |
-| Thread pool | 1-65535 | 12.6 s |
+| Version | Target | Ports | Time |
+|---|---|---|---|
+| One port at a time | 1 address | 1-1249 | 20.2 s |
+| Thread pool | 1 address | 1-1249 | 0.24 s |
+| Thread pool | 1 address | 1-65535 | 12.6 s |
+| Thread pool | 14 addresses (`/28`) | 1-1023 | 3.24 s |
 
 ## Challenges and what I learned
 
@@ -74,10 +87,18 @@ Tested on `127.0.0.1` with a 0.01 second timeout and 100 workers:
 
 **Errors that hide.** A bare `except` made every bad input look the same and would have hidden real bugs. I changed it to catch `ValueError` only. I also found that IPv6 input would crash inside a worker thread because the socket is IPv4 only, so the input check now rejects IPv6 up front.
 
+**Port ranges and off-by-one errors.** Python's `range()` stops before its last value, so the scan loop needs the last port plus one to include it. I checked the definition of "well-known" ports against a reference instead of trusting my memory, and it is 1-1023 (port 0 is reserved). I tested the menu with bad input such as `0`, `65536`, text, and a backwards range like `80` then `20`, and each is rejected without crashing.
+
 ## Limitations
 
 - **IPv4 and TCP only.** IPv6 and UDP are not supported.
 - **The default timeout is tuned for scanning your own machine.** On a real network, replies take longer than 10 ms, so open ports may be missed. Raise `TIMEOUT` (around 0.5 is safer) for other devices, which makes scans slower.
 - **Open or not, nothing more.** A failed connection could mean the port is closed or filtered by a firewall, and the scanner doesn't tell them apart.
-- **Large ranges take a long time,** because every port on every address is checked.
+- **Large ranges take a long time,** because every chosen port on every address is checked. Choosing fewer ports with the menu helps.
 - **Windows:** on my laptop, a long timeout makes scans of `127.0.0.1` very slow.
+- **Prompts only:** the target and ports are typed in when the program asks, and there are no command-line options yet.
+
+## Planned improvements
+
+- Service names for well-known ports, and banner grabbing on open ports
+- Command-line options with `argparse`, including the timeout and number of workers
